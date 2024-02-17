@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"os"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/jfilipedias/rinha-backend-2024-q1-go/internal/handler"
@@ -11,7 +12,7 @@ import (
 )
 
 func main() {
-	db, err := pgxpool.New(context.Background(), "user=local_user password=local_password dbname=local_db host=localhost port=5432 sslmode=disable")
+	db, err := pgxpool.New(context.Background(), os.Getenv("POSTGRES_DSN"))
 	if err != nil {
 		panic(err.Error())
 	}
@@ -24,6 +25,7 @@ func main() {
 	mux.HandleFunc("GET /clientes/{id}/extrato", handler.FindStatementByCustomerID)
 	mux.HandleFunc("POST /clientes/{id}/transacoes", handler.CreateTransaction)
 
-	fmt.Println("Server listen into port 8080")
-	http.ListenAndServe(":8080", mux)
+	port := os.Getenv("API_PORT")
+	fmt.Println("Server listen into port " + port)
+	http.ListenAndServe(":"+port, mux)
 }

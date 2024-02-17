@@ -9,15 +9,12 @@ CREATE TABLE IF NOT EXISTS transactions (
     value INTEGER NOT NULL,
     type CHAR(1) NOT NULL,
     description VARCHAR(10) NOT NULL,
-    created_at TIMESTAMP NOT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
     customer_id INTEGER NOT NULL,
     CONSTRAINT fk_transaction_customer_id
         FOREIGN KEY (customer_id)
         REFERENCES customers (id)
 );
-
-CREATE INDEX IF NOT EXISTS idx_transactions_customer_id 
-    ON transactions (customer_id ASC);
 
 CREATE TABLE IF NOT EXISTS balances (
     id SERIAL PRIMARY KEY,

@@ -3,33 +3,19 @@ package repository
 import (
 	"context"
 	"errors"
-	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/jfilipedias/rinha-backend-2024-q1-go/internal/entity"
 )
 
-type Transaction struct {
-	ID          int       `json:"-"`
-	Value       int       `json:"valor"`
-	Type        string    `json:"tipo"`
-	Description string    `json:"descricao"`
-	CreatedAt   time.Time `json:"realizada_em"`
-	CustomerID  int       `json:"-"`
-}
-
-type Balance struct {
-	Total     int       `json:"total"`
-	Limit     int       `json:"limite"`
-	CreatedAt time.Time `json:"data_extrato"`
-}
-
-type Statement struct {
-	Balance            Balance       `json:"saldo"`
-	LatestTransactions []Transaction `json:"ultimas_transacoes"`
+type CreateTransactionResult struct {
+	Balance int `json:"saldo"`
+	Limit   int `json:"limite"`
 }
 
 var ErrCustomerNotFound = errors.New("customer not found")
+var ErrInsufficientLimit = errors.New("insufficient limit")
 
 type Repository struct {
 	db *pgxpool.Pool
@@ -39,7 +25,7 @@ func NewRepository(db *pgxpool.Pool) *Repository {
 	return &Repository{db: db}
 }
 
-func (r *Repository) FindStatementByCustomerID(customerID int) (*Statement, error) {
+func (r *Repository) FindStatementByCustomerID(customerID int) (*entity.Statement, error) {
 	sql := `
 		SELECT c.debit_limit AS limit, b.value AS total, NOW() AS created_at 
 		FROM customers AS c 
@@ -47,7 +33,7 @@ func (r *Repository) FindStatementByCustomerID(customerID int) (*Statement, erro
 		WHERE c.id = $1
 	`
 
-	var balance Balance
+	var balance entity.Balance
 	err := r.db.QueryRow(context.Background(), sql, customerID).Scan(&balance.Limit, &balance.Total, &balance.CreatedAt)
 	if err != nil {
 		if err == pgx.ErrNoRows {
@@ -58,16 +44,16 @@ func (r *Repository) FindStatementByCustomerID(customerID int) (*Statement, erro
 	}
 
 	rows, err := r.db.Query(context.Background(),
-		"SELECT value, type, description, created_at FROM transactions WHERE customer_id = $1 ORDER BY created_at DESC LIMIT 1",
+		"SELECT value, type, description, created_at FROM transactions WHERE customer_id = $1 ORDER BY created_at DESC LIMIT 10",
 		customerID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 
-	transactions := make([]Transaction, 0)
+	transactions := make([]entity.Transaction, 0)
 	for rows.Next() {
-		var transaction Transaction
+		var transaction entity.Transaction
 		err := rows.Scan(&transaction.Value, &transaction.Type, &transaction.Description, &transaction.CreatedAt)
 		if err != nil {
 			return nil, err
@@ -75,10 +61,77 @@ func (r *Repository) FindStatementByCustomerID(customerID int) (*Statement, erro
 		transactions = append(transactions, transaction)
 	}
 
-	statement := &Statement{
+	statement := &entity.Statement{
 		Balance:            balance,
 		LatestTransactions: transactions,
 	}
 
 	return statement, nil
+}
+
+func (r *Repository) CreateTransaction(transaction *entity.Transaction) (*CreateTransactionResult, error) {
+	ctx := context.Background()
+	tx, err := r.db.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback(ctx)
+
+	sql := `
+		SELECT c.debit_limit, b.value
+			FROM customers AS c 
+			INNER JOIN balances AS b
+			ON b.customer_id = c.id
+			WHERE c.id = $1
+			FOR UPDATE;
+	`
+
+	var balance entity.Balance
+	err = tx.QueryRow(ctx, sql, transaction.CustomerID).Scan(&balance.Limit, &balance.Total)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return nil, ErrCustomerNotFound
+		}
+
+		return nil, err
+	}
+
+	if transaction.Type == "d" && balance.Total-transaction.Value < -balance.Limit {
+		return nil, ErrInsufficientLimit
+	}
+
+	if transaction.Type == "d" {
+		transaction.Value *= -1
+	}
+
+	sql = `
+		UPDATE balances
+			SET value = value + $1
+			WHERE customer_id = $2;
+	`
+	_, err = tx.Exec(ctx, sql, transaction.Value, transaction.CustomerID)
+	if err != nil {
+		return nil, err
+	}
+
+	sql = `
+		INSERT INTO transactions (value, type, description, customer_id)
+			VALUES ($1, $2, $3, $4)
+	`
+	_, err = tx.Exec(ctx, sql, transaction.Value, transaction.Type, transaction.Description, transaction.CustomerID)
+	if err != nil {
+		return nil, err
+	}
+
+	err = tx.Commit(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	result := &CreateTransactionResult{
+		Balance: balance.Total + transaction.Value,
+		Limit:   balance.Limit,
+	}
+
+	return result, nil
 }

@@ -96,12 +96,12 @@ func (r *Repository) CreateTransaction(transaction *entity.Transaction) (*Create
 		return nil, err
 	}
 
-	if transaction.Type == "d" && balance.Total-transaction.Value < -balance.Limit {
-		return nil, ErrInsufficientLimit
-	}
-
+	signedValue := transaction.Value
 	if transaction.Type == "d" {
-		transaction.Value *= -1
+		if balance.Total-transaction.Value < -balance.Limit {
+			return nil, ErrInsufficientLimit
+		}
+		signedValue = -transaction.Value
 	}
 
 	sql = `
@@ -109,7 +109,7 @@ func (r *Repository) CreateTransaction(transaction *entity.Transaction) (*Create
 			SET value = value + $1
 			WHERE customer_id = $2;
 	`
-	_, err = tx.Exec(ctx, sql, transaction.Value, transaction.CustomerID)
+	_, err = tx.Exec(ctx, sql, signedValue, transaction.CustomerID)
 	if err != nil {
 		return nil, err
 	}

@@ -52,10 +52,13 @@ func (h *Handler) CreateTransaction(w http.ResponseWriter, r *http.Request) {
 
 	var body CreateTransactionRequestBody
 	err = json.NewDecoder(r.Body).Decode(&body)
-	if err != nil ||
-		(body.Type != "c" && body.Type != "d") ||
-		(body.Description == "" || len(body.Description) > 10) {
+	if err != nil {
 		http.Error(w, err.Error(), http.StatusUnprocessableEntity)
+		return
+	}
+
+	if (body.Type != "c" && body.Type != "d") || (body.Description == "" || len(body.Description) > 10) {
+		http.Error(w, "invalid body", http.StatusUnprocessableEntity)
 		return
 	}
 

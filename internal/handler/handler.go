@@ -76,6 +76,11 @@ func (h *Handler) CreateTransaction(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
+		if err == repository.ErrInsufficientLimit {
+			http.Error(w, err.Error(), http.StatusUnprocessableEntity)
+			return
+		}
+
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
